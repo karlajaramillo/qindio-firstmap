@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>Odyssey.js Slides</title>
+  <meta name="description" content="">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <link rel="icon" type="image/x-icon" href="http://cartodb.github.io/odyssey.js/sandbox/favicon.png">
+  <link rel="icon" type="image/png" href="http://cartodb.github.io/odyssey.js/sandbox/favicon.png">
+
+  <link rel="stylesheet" href="http://cartodb-libs.global.ssl.fastly.net/cartodb.js/v3/themes/css/cartodb.css">
+  <link rel="stylesheet" href="http://cartodb.github.io/odyssey.js/sandbox/css/slides.css">
+  <script src="http://cartodb.github.io/odyssey.js/vendor/modernizr-2.6.2.min.js"></script>
+  
+<link rel="stylesheet" media="screen" type="text/css" href="css/app.css"/>
+
+</head>
+<body>
+  <div id="map" style="width: 100%; height: 100%;"></div>
+
+  <div id="slides_container" style="display:block;">
+    <div id="dots"></div>
+
+    <div id="slides"></div>
+
+    <ul id="navButtons">
+      <li><a class="prev"></a></li>
+      <li><a class="next"></a></li>
+    </ul>
+  </div>
+
+  <div id="credits">
+    <span class="title" id="title">Title</span>
+    <span class="author"><strong id="author">By Name using</strong> <a href="http://cartodb.github.io/odyssey.js/">Odyssey.js</a><span>
+  </span></span></div>
+
+  <script src="http://cartodb-libs.global.ssl.fastly.net/cartodb.js/v3/cartodb.js"></script>
+  <script src="http://cartodb.github.io/odyssey.js/dist/odyssey.js" charset="UTF-8"></script>
+
+  <script>
+    //https://github.com/CartoDB/cartodb/wiki/BaseMaps-available
+    //maps available in CartoDB
+    
+    var resizePID;
+
+    function clearResize() {
+      clearTimeout(resizePID);
+      resizePID = setTimeout(function() { adjustSlides(); }, 100);
+    }
+
+    if (!window.addEventListener) {
+      window.attachEvent("resize", function load(event) {
+        clearResize();
+      });
+    } else {
+      window.addEventListener("resize", function load(event) {
+        clearResize();
+      });
+    }
+
+    function adjustSlides() {
+      var container = document.getElementById("slides_container"),
+          slide = document.querySelectorAll('.selected_slide')[0];
+
+      if (slide) {
+        if (slide.offsetHeight+169+40+80 >= window.innerHeight) {
+          container.style.bottom = "80px";
+
+          var h = container.offsetHeight;
+
+          slide.style.height = h-169+"px";
+          slide.classList.add("scrolled");
+        } else {
+          container.style.bottom = "auto";
+          container.style.minHeight = "0";
+
+          slide.style.height = "auto";
+          slide.classList.remove("scrolled");
+        }
+      }
+    }
+
+    var resizeAction = O.Action(function() {
+      function imageLoaded() {
+        counter--;
+
+        if (counter === 0) {
+          adjustSlides();
+        }
+      }
+      var images = $('img');
+      var counter = images.length;
+
+      images.each(function() {
+        if (this.complete) {
+          imageLoaded.call( this );
+        } else {
+          $(this).one('load', imageLoaded);
+        }
+      });
+    });
+
+    function click(el) {
+      var element = O.Core.getElement(el);
+      var t = O.Trigger();
+
+      // TODO: clean properly
+      function click() {
+        t.trigger();
+      }
+
+      if (element) element.onclick = click;
+
+      return t;
+    }
+
+    O.Template({
+      init: function() {
+        var seq = O.Triggers.Sequential();
+
+        var baseurl = this.baseurl = 'http://{s}.api.cartocdn.com/base-light/{z}/{x}/{y}.png';
+        var map = this.map = L.map('map').setView([0, 0.0], 4);
+        var basemap = this.basemap = L.tileLayer(baseurl, {
+          attribution: 'data OSM - map CartoDB'
+        }).addTo(map);
+
+        // enanle keys to move
+        O.Keys().on('map').left().then(seq.prev, seq)
+        O.Keys().on('map').right().then(seq.next, seq)
+
+        click(document.querySelectorAll('.next')).then(seq.next, seq)
+        click(document.querySelectorAll('.prev')).then(seq.prev, seq)
+
+        var slides = O.Actions.Slides('slides');
+        var story = O.Story()
+
+        this.story = story;
+        this.seq = seq;
+        this.slides = slides;
+        this.progress = O.UI.DotProgress('dots').count(0);
+      },
+
+      update: function(actions) {
+        var self = this;
+
+        if (!actions.length) return;
+
+        this.story.clear();
+
+        if (this.baseurl && (this.baseurl !== actions.global.baseurl)) {
+          this.baseurl = actions.global.baseurl || 'http://0.api.cartocdn.com/base-light/{z}/{x}/{y}.png';
+
+          this.basemap.setUrl(this.baseurl);
+        }
+
+        if (this.cartoDBLayer && ("http://"+self.cartoDBLayer.options.user_name+".cartodb.com/api/v2/viz/"+self.cartoDBLayer.options.layer_definition.stat_tag+"/viz.json" !== actions.global.vizjson)) {
+          this.map.removeLayer(this.cartoDBLayer);
+
+          this.cartoDBLayer = null;
+          this.created = false;
+        }
+
+        if (actions.global.vizjson && !this.cartoDBLayer) {
+          if (!this.created) { // sendCode debounce < vis loader
+            cdb.vis.Loader.get(actions.global.vizjson, function(vizjson) {
+              self.map.fitBounds(vizjson.bounds);
+
+              cartodb.createLayer(self.map, vizjson)
+                .done(function(layer) {
+                  self.cartoDBLayer = layer;
+
+                  var sublayer = layer.getSubLayer(0),
+                      layer_name = layer.layers[0].options.layer_name,
+                      filter = actions.global.cartodb_filter ? " WHERE "+actions.global.cartodb_filter : "";
+
+                  sublayer.setSQL("SELECT * FROM "+layer_name+filter)
+
+                  self.map.addLayer(layer);
+
+                  self._resetActions(actions);
+                }).on('error', function(err) {
+                  console.log("some error occurred: " + err);
+                });
+            });
+
+            this.created = true;
+          }
+
+          return;
+        }
+
+        this._resetActions(actions);
+      },
+
+      _resetActions: function(actions) {
+        // update footer title and author
+        var title_ = actions.global.title === undefined ? '' : actions.global.title,
+            author_ = actions.global.author === undefined ? 'Using' : 'By '+actions.global.author+' using';
+
+        document.getElementById('title').innerHTML = title_;
+        document.getElementById('author').innerHTML = author_;
+        document.title = title_ + " | " + author_ +' Odyssey.js';
+
+        var sl = actions;
+
+        document.getElementById('slides').innerHTML = ''
+        this.progress.count(sl.length);
+
+        // create new story
+        for(var i = 0; i < sl.length; ++i) {
+          var slide = sl[i];
+          var tmpl = "<div class='slide' style='diplay:none'>";
+
+          tmpl += slide.html();
+          tmpl += "</div>";
+          document.getElementById('slides').innerHTML += tmpl;
+
+          this.progress.step(i).then(this.seq.step(i), this.seq)
+
+          var actions = O.Parallel(
+            this.slides.activate(i),
+            slide(this),
+            this.progress.activate(i),
+            resizeAction
+          );
+
+          actions.on("finish.app", function() {
+            adjustSlides();
+          });
+
+          this.story.addState(
+            this.seq.step(i),
+            actions
+          )
+        }
+
+        this.story.go(this.seq.current());
+      },
+
+      changeSlide: function(n) {
+        this.seq.current(n);
+      }
+    });
+  </script>
+
+  <script>
+    (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+    (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+    m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+    })(window,document,'script','//www.google-analytics.com/analytics.js','ga');
+
+    ga('create', 'UA-20934186-21', 'cartodb.github.io');
+    ga('send', 'pageview');
+  </script>
+
+
+<script id="md_template" type="text/template">```
+-title: "James Rodríguez career"
+-author: "Qindio"
+```
+#James Rodríguez
+```
+- center: [4.7388474,-74.9218121]
+- zoom: 5
+```
+![JamesRodriguez](https://dl.dropboxusercontent.com/u/66649980/james-rodriguez-colombia.jpg)
+Source: [Sports ndtv](http://sports.ndtv.com/fifa-world-cup-2014/news/226874-world-cup-2014-colombia-s-james-rodriquez-wins-golden-boot-award)
+
+If you want to know more about the colombian football player, please start clicking on the button below. 
+
+#Where the James Rodríguez story begins
+```
+- center: [7.8933, -72.4940]
+- zoom: 8
+L.marker([7.8933, -72.4940]).actions.addRemove(S.map)
+```
+
+James Rodríguez was born in Cúcuta, Norte de Santander, Colombia on the 12nd of July in 1991. His parents are Maria Del Pilar Rubio and Wilson James Rodríguez Bedolla, who also was a professional footballer.
+![Born](https://dl.dropboxusercontent.com/u/66649980/photo1_born.jpg)
+Source: [Jetset](http://www.jetset.com.co/edicion-impresa/album-de-fotos-revista-jetset/galeria/james-rodriguez-fotos/110380)
+
+#His childhood
+```
+- center: [4.4340, -75.2248]
+- zoom: 8
+L.marker([4.4340, -75.2275]).actions.addRemove(S.map)
+```
+It was in 1996 when James came to Ibagué, where he spent his childhood and started his football career. When he was only 12, being enrolled in the Tolimense Soccer Academy, he managed to achieve the title of the Pony Football mars court in Medellin. 
+![Pony Fooball title](https://dl.dropboxusercontent.com/u/66649980/photo2_tolima1.jpg)
+Source: [Twitter](https://twitter.com/jamesdrodriguez/media)
+
+![Pony Football title1](https://dl.dropboxusercontent.com/u/66649980/photo2_tolima.jpg)
+Source: [Jetset](http://www.jetset.com.co/edicion-impresa/album-de-fotos-revista-jetset/galeria/james-rodriguez-fotos/110380)
+
+#His first professional football club at Envigado, Colombia
+
+```
+- center: [6.143835,-75.57239]
+- zoom: 8
+L.marker([6.143835,-75.57239]).actions.addRemove(S.map)
+```
+At the time James was 14, he made his professional debut playing for Envigado FC, a Colombian second division club,with whom James made the ascent in 2007. During two seasons, James scored 9 goals and played in 30 matches. 
+
+![Envigado](https://dl.dropboxusercontent.com/u/66649980/envigado.jpg)
+Source: [Twitter](https://twitter.com/jamesdrodriguez/media)
+
+
+#James in Banfield, Argentina
+
+James joined Argentine team Club Atlético Banfield in 2008. James scored 10 goals and appeared in 50 matches in two seasons. He scored his first goal on the 27th of february in 2009, with a 3-1 victory over Rosario Central team. With only 17 years old, James was the youngest foreigner to score a goal in Argentina.
+
+James scored his second goal for Banfield on 26 September in an important 2-1 match against Newell's Old Boys, in which Banfield won the Argentine championship for the first time in the history of their club.
+
+```
+- center: [-34.7443542,-58.3827337]
+- zoom: 5
+L.marker([-34.7443542,-58.3827337]).actions.addRemove(S.map)
+```
+![Banfield](https://dl.dropboxusercontent.com/u/66649980/argentina.jpeg)
+Source: [Futbolred](http://www.futbolred.com/colombianos-exterior/noticias/marzo10/james-rodriguez-anoto-dos-goles-en-el-empate-2-2-de-banfield-con-nacional/7388249) 
+
+![Argentina 2009](https://dl.dropboxusercontent.com/u/66649980/photo4_argentina1.jpg)
+Source: [Jetset](http://www.jetset.com.co/edicion-impresa/album-de-fotos-revista-jetset/galeria/james-rodriguez-fotos/110380)
+
+#James in Porto, Portugal
+James signed a 4-year contract with FC Porto for €5.1 million on 6 July 2010. He made a total of 105 appearances and 32 goals. 
+
+On his first game James scored his first goal in a friendly againts Amsterdamsche Football Club Ajax on 18 July.
+
+James achived his first goal in European football in a 3-1 victory against CSKA Sofia on 15 December 2010.
+
+During 2011–12 season, James scored 14 goals for Porto and delivered 11 assists. It was in 2001 when he received the LPFP Award for Breakthrough Player of 2011–12 Primeira Liga season at age 20. 
+
+In the 2012-13 season, James scored 13 goals and provided 15 assists within 32 appearances in all competitions for Porto. 
+
+```
+- center: [41.1621429,-8.6218531]
+- zoom: 6
+L.marker([41.1621429,-8.6218531]).actions.addRemove(S.map)
+```
+![](https://dl.dropboxusercontent.com/u/66649980/porto.jpg)
+Source: [Marca](http://www.marca.com/2013/05/21/futbol/futbol_internacional/liga_francesa/1369137983.html)
+
+![](https://dl.dropboxusercontent.com/u/66649980/portofinal.jpg)
+Source: [Dailymail](http://www.dailymail.co.uk/sport/football/article-2232176/James-Rodriguez-Manchester-United-watch-Porto-winger-seventh-time-season.html)
+
+#James in Monaco, France
+James signed a five-year contract to join the AS Monaco club on 24 May 2013, a €45 million transfer fee, making him the second-most expensive Colombian, after Radamel Falcao.
+
+James finished the season with 10 goals scored and 38 assists, became the top assistor in the French League. 
+
+```
+- center: [43.5201387,7.0783856]
+- zoom: 7
+L.marker([43.5201387,7.0783856]).actions.addRemove(S.map)
+```
+![monaco James Rodríguez](https://dl.dropboxusercontent.com/u/66649980/monaco1.jpg)
+February 15, 2014
+Monaco's 2-0 victory at Bastia
+Source: [Rediff](http://www.rediff.com/sports/report/ligue-1-james-rodriguez-at-the-double-as-monaco-win-at-bastia/20140216.htm), [Reuters](http://uk.reuters.com/article/2014/02/15/uk-soccer-france-idUKBREA1E0W420140215)
+![monaco January 2014](https://dl.dropboxusercontent.com/u/66649980/monaco2014.jpeg)
+January 10, 2014
+French League soccer match in Montpellier.
+Source: [Reuters](http://uk.reuters.com/article/2014/01/11/uk-soccer-france-idUKBREA0918P20140111)
+
+# 2014 FIFA Wold Cup, Colombia - Greece
+```
+- center: [-19.9178713,-43.9603116]
+- zoom: 7
+L.marker([-19.9178713,-43.9603116]).actions.addRemove(S.map)
+```
+In the 3-0 victory match against Greece in Belo Horizonte , James rounded off the scoring with an excelent performance. 
+![Greece](https://dl.dropboxusercontent.com/u/66649980/greece.jpg)
+Colombia - Greece at Mineirao Arena in Belo Horizonte on June 14. 
+Source: [Hindustantimes](http://www.hindustantimes.com/specials/football/worldcup2014/fwc-topstories/colombia-shrug-off-falcao-absence-to-beat-greece-3-0-in-group-c/sp-article10-1229598.aspx)
+
+# 2014 FIFA Wold Cup, Colombia - Ivory Coast
+```
+- center: [-15.7217621,-47.9382362]
+- zoom: 6
+L.marker([-15.7217621,-47.9382362]).actions.addRemove(S.map)
+```
+
+2-1 Colombia - Ivory Coast on June 19.
+After scoring his first goal against Ivory Coast in the 64th minute. James #10 celebrated with his teammates performing an original choreography at Estadio Nacional in Brasilia, Brazil.
+![Ivory coast](https://dl.dropboxusercontent.com/u/66649980/ivory.jpg)
+Source: [ABCNews](http://abcnews.go.com/Sports/2014-fifa-world-cup-colombia-dances-victory-ivory/story?id=24216089)
+
+
+# 2014 FIFA Wold Cup, Colombia - Japan
+```
+- center: [-15.604017,-56.121632]
+- zoom: 6
+L.marker([-15.604017,-56.121632]).actions.addRemove(S.map)
+```
+4-1 Colombia - Japan on June 24.
+ The midfielder James was  again the star for Colombia scoring the last goal in the 90th minute at  Arena Pantanal, Cuiba.
+ 
+ ![Japan](https://dl.dropboxusercontent.com/u/66649980/japan.jpg)
+Source: [Canada.com](http://o.canada.com/sports/soccer/world-cup/fifa-world-cup-gallery-japan-vs-colombia)
+
+ 
+# 2014 FIFA Wold Cup, Colombia - Uruguay
+```
+- center: [-22.912109,-43.230156]
+- zoom: 7
+L.marker([-22.912109,-43.230156]).actions.addRemove(S.map)
+```
+2-0 Colombia - Uruguay on June 28.
+James scored two goals against Uruguay. The first one in the 28th minute, then it would came the 2-0 goal in the 50th minute at Maracana in Rio de Janeiro, Brazil.
+![Uruguay](https://dl.dropboxusercontent.com/u/66649980/uruguay.jpg)
+Source: [Canada.com](http://o.canada.com/sports/soccer/world-cup/fifa-world-cup-colombia-vs-uruguay)
+
+James Rodríguez celebrates scoring the second goal during the Round of 16 football match between Colombia and Uruguay.
+![Uruguay1](https://dl.dropboxusercontent.com/u/66649980/uruguay2goal.jpg)
+Source: [Canada.com](http://o.canada.com/sports/soccer/world-cup/fifa-world-cup-colombia-vs-uruguay)
+
+
+# 2014 FIFA Wold Cup, Colombia - Brazil
+```
+- center: [-3.807283,-38.522433]
+- zoom: 7
+L.marker([-3.807283,-38.522433]).actions.addRemove(S.map)
+```
+2-2 Colombia - Brazil on June 28 2014
+James shot and scored his only team's goal, a penalty in the 80th minute during the quarter-final football match  at Castelao in Fortaleza, Brazil. 
+
+![Brazil](https://dl.dropboxusercontent.com/u/66649980/brazil.jpg)
+Source: Robert Cianflone, [Getty Images](http://www.gettyimages.es/editorial/james-rodriguez-pictures)
+
+
+#James got Golden Boot award, World Cup in Brazil 2014 
+```
+- center: [-3.807283,-38.522433]
+- zoom: 13
+L.marker([-3.807283,-38.522433]).actions.addRemove(S.map)
+```
+
+At the top scorer with six goals at the FIFA World Cup in Brazil, the young striker won the Golden Boot award, despite having his Colombian team been eliminated in quarter-finals. 
+![goalprize](https://dl.dropboxusercontent.com/u/66649980/fifa.jpg)
+Source: [FIFA](http://fifaworld-cup.com/james-rodriguez-wins-golden-boot-award-at-fifa-world-cup-2014/)
+
+#About the author
+
+This map was created using CartoDB and Odyssey library. 
+
+If you want to exchange and contribute with GIS ideas, just check out [myprofile](http://karlajaramillo.com). I'm a GIS passionate who enjoysdiscovering new ways to get a deep insight about maps.
+
+
+</script></body></html>
