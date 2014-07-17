@@ -1,0 +1,23 @@
+#slides_container{
+	top: 40px !important;
+	left:auto;
+	right: 40px;
+	width: 400px;
+	background-color: rgba(51,50,51,0.8);
+	border-radius: .2em;
+	box-shadow: 3px 3px 10px rgba(0,0,0,0.3);
+}
+
+h1{
+	color: #fff !important;
+}
+
+p{
+color: #fff !important;
+font-family:sans-serif,"Trebuchet MS" !important;
+font-family:
+}
+
+#dots li a {
+	color: rgba(255,255,255,0.7) !important;
+}
